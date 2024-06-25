@@ -1,46 +1,69 @@
-var Discord = require('discord.io');
-var logger = require('winston');
-var auth = require('./auth.json');
+const fs = require("node:fs");
+const path = require("node:path");
 
-logger.remove(logger.transports.Console);
-logger.add(new logger.transports.Console, {
-    colorize: true
-});
-logger.level = 'debug';
-var bot = new Discord.Client({
-   token: auth.token,
-   autorun: true
-});
-bot.on('ready', function (evt) {
-    logger.info('Connected');
-    logger.info('Logged in as: ');
-    logger.info(bot.username + ' - (' + bot.id + ')');
-});
-bot.on('message', function (user, userID, channelID, message, evt) {
-    if (message.substring(0, 1) == '/') {
-        var args = message.substring(1).split(' ');
-        var cmd = args[0];
+const { Client, Events, GatewayIntentBits } = require("discord.js");
+const { token } = require("./auth.json");
 
-        args = args.splice(1);
-        switch(cmd) {
-            case 'Fucky':
-                bot.sendMessage({
-                    to: channelID,
-                    message: 'Wucky!'
-                });
-                break; 
-            case 'Mom´s':
-                bot.sendMessage({
-                    to: channelID,
-                    message: 'Spaghetti!'
-                });
-                break;
-                case 'Caity':
-                    bot.sendMessage({
-                        to: channelID,
-                        message: 'is my Mother!'
-                    });
-                    break;
-        }
-    }
+// Setup logger
+const logger = require("./utils/log.js");
+const { eventNames } = require("node:process");
+
+// Init the client
+
+const client = new Client({
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.MessageContent,
+	],
 });
+
+// Loads commands dynamically
+
+client.commands = {};
+const commandFolders = fs.readdirSync(path.join(__dirname, "commands"));
+
+for (const folder of commandFolders) {
+	const commandsPath = path.join(foldersPath, folder);
+	const commandFiles = fs
+		.readdirSync(commandsPath)
+		.filter((file) => file.endsWith(".js"));
+
+	for (const file of commandFiles) {
+		const filePath = path.join(commandsPath, file);
+		const command = require(filePath);
+		if ("data" in command && "execute" in command) {
+			client.commands.set(command.data.name, command);
+		} else {
+			logger.warn(
+				`The command at ${filePath} is missing a required "data" or "execute" property.`,
+			);
+		}
+	}
+}
+
+// Loads events dynamically
+
+const eventsPath = path.join(__dirname, "events");
+const eventFiles = fs
+	.readdirSync(eventsPath)
+	.filter((file) => file.endsWith(".js"));
+
+for (const file of eventFiles) {
+	const filePath = path.join(eventsPath, file);
+	const event = require(filePath);
+	if (!("name" in event) || !("once" in event) || !("execute" in event)) {
+		logger.warn(
+			`The event at ${filePath} is missing a required "name", "once" or "execute" property.`,
+		);
+		continue;
+	}
+
+	if (event.once) {
+		client.once(event.name, (...args) => event.execute(...args, client));
+	} else {
+		client.on(event.name, (...args) => event.execute(...args, client));
+	}
+}
+
+client.login(token);
